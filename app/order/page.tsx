@@ -36,6 +36,7 @@ function OrderPageContent() {
 
   async function handleDeliverySubmit(delivery: DeliveryData) {
     if (!lead) {
+      setSubmitError("Customer details are missing. Please go back and try again.");
       return;
     }
 
@@ -54,48 +55,103 @@ function OrderPageContent() {
       const utmCampaign =
         searchParams.get("utm_campaign") || undefined;
 
+      const payload = {
+        fullName: lead.name,
+        mobile: lead.mobile,
+
+        houseBuilding: delivery.houseBuilding,
+        streetArea: delivery.streetArea,
+        locality: delivery.locality,
+        district: delivery.district,
+        state: delivery.state,
+        pincode: delivery.pincode,
+
+        quantity: Number(delivery.quantity),
+
+        source: utmSource || "Website",
+
+        utmSource,
+        utmMedium,
+        utmCampaign,
+      };
+
+      console.log("Submitting order:", payload);
+
       const response = await fetch("/api/leads", {
         method: "POST",
 
         headers: {
           "Content-Type": "application/json",
+          Accept: "application/json",
         },
 
-        body: JSON.stringify({
-          fullName: lead.name,
-          mobile: lead.mobile,
-
-          houseBuilding: delivery.houseBuilding,
-          streetArea: delivery.streetArea,
-          locality: delivery.locality,
-          district: delivery.district,
-          state: delivery.state,
-          pincode: delivery.pincode,
-
-          quantity: Number(delivery.quantity),
-
-          source: utmSource || "Website",
-
-          utmSource,
-          utmMedium,
-          utmCampaign,
-        }),
+        body: JSON.stringify(payload),
       });
 
-      const data = await response.json();
+      /*
+       * Don't immediately call response.json().
+       * First read the response as text so that an HTML/empty/error
+       * response doesn't create another JSON parsing error.
+       */
+      const responseText = await response.text();
 
+      console.log("API status:", response.status);
+      console.log("API response:", responseText);
+
+      let data: any = {};
+
+      if (responseText) {
+        try {
+          data = JSON.parse(responseText);
+        } catch (jsonError) {
+          console.error(
+            "API returned non-JSON response:",
+            jsonError
+          );
+
+          setSubmitError(
+            `Server error (${response.status}). Please try again.`
+          );
+
+          setSubmitting(false);
+          return;
+        }
+      }
+
+      /*
+       * HTTP error from /api/leads
+       */
       if (!response.ok) {
-        setSubmitError(
-          data?.error === "Validation failed."
-            ? "Please check the highlighted fields and try again."
-            : "Something went wrong. Please try again or contact support."
-        );
+        console.error("API request failed:", {
+          status: response.status,
+          data,
+        });
+
+        if (data?.error === "Validation failed.") {
+          setSubmitError(
+            "Please check the highlighted fields and try again."
+          );
+        } else if (data?.error) {
+          setSubmitError(data.error);
+        } else {
+          setSubmitError(
+            `Order could not be submitted (${response.status}). Please try again.`
+          );
+        }
 
         setSubmitting(false);
         return;
       }
 
+      /*
+       * Successful request but no lead ID
+       */
       if (!data?.leadId) {
+        console.error(
+          "Successful API response but leadId is missing:",
+          data
+        );
+
         setSubmitError(
           "Order was submitted, but the confirmation ID was not received. Please contact support."
         );
@@ -104,14 +160,22 @@ function OrderPageContent() {
         return;
       }
 
+      /*
+       * Everything worked
+       */
+      console.log("Order successfully created:", data.leadId);
+
       router.push(
         `/thank-you?leadId=${encodeURIComponent(data.leadId)}`
       );
     } catch (error) {
       console.error("Order submission error:", error);
 
+      /*
+       * This means the browser could not complete the fetch itself.
+       */
       setSubmitError(
-        "Network error. Please check your connection and try again."
+        "Unable to connect to the order server. Please check your internet connection and try again."
       );
 
       setSubmitting(false);
