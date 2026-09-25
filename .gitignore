@@ -6,3 +6,6 @@ out
 *.log
 .vercel
 data/leads.json
+
+.vercel
+.env*

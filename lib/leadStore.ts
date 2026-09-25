@@ -1,56 +1,193 @@
-import fs from "fs";
-import path from "path";
+import postgres from "postgres";
 import type { Lead } from "./types";
 
 /**
- * DEMO STORAGE ONLY.
+ * Persistent lead storage using PostgreSQL.
  *
- * This writes leads to a JSON file on disk so the flow works out of the box
- * on `next dev` / a single long-running server. Vercel's serverless functions
- * have an EPHEMERAL, READ-ONLY (outside /tmp) filesystem — data written here
- * will NOT persist reliably in production and will not survive across
- * function instances.
+ * Required environment variable:
  *
- * Before going live, replace the two functions below with calls to a real
- * database, e.g.:
- *   - Vercel Postgres / Neon / Supabase (recommended — relational, easy dashboard queries)
- *   - PlanetScale (MySQL)
- *   - MongoDB Atlas
- *
- * Keep the exact function signatures (`saveLead`, `getNextLeadNumber`) so the
- * rest of the app doesn't need to change.
+ * DATABASE_URL
  */
 
-const DATA_DIR = path.join(process.cwd(), "data");
-const DATA_FILE = path.join(DATA_DIR, "leads.json");
+const databaseUrl = process.env.DATABASE_URL;
 
-function readAll(): Lead[] {
-  try {
-    if (!fs.existsSync(DATA_FILE)) return [];
-    const raw = fs.readFileSync(DATA_FILE, "utf-8");
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
+if (!databaseUrl) {
+  console.warn(
+    "[Lead Store] DATABASE_URL is not configured."
+  );
+}
+
+const sql = databaseUrl
+  ? postgres(databaseUrl, {
+      prepare: false,
+      max: 1,
+    })
+  : null;
+
+let tableReady: Promise<void> | null = null;
+
+/**
+ * Create the database table and sequence if they don't exist.
+ */
+async function ensureDatabase(): Promise<void> {
+  if (!sql) {
+    throw new Error(
+      "DATABASE_URL is not configured."
+    );
   }
+
+  if (!tableReady) {
+    tableReady = (async () => {
+      // Lead number sequence.
+      // Starts at 0 because the API adds +1.
+      await sql`
+        CREATE SEQUENCE IF NOT EXISTS lead_number_seq
+        MINVALUE 0
+        START 0
+      `;
+
+      // Leads table.
+      await sql`
+        CREATE TABLE IF NOT EXISTS leads (
+          id BIGSERIAL PRIMARY KEY,
+
+          lead_id VARCHAR(20) NOT NULL UNIQUE,
+
+          name TEXT NOT NULL,
+
+          mobile VARCHAR(20) NOT NULL,
+
+          house_building TEXT NOT NULL,
+
+          street_area TEXT NOT NULL,
+
+          locality TEXT NOT NULL,
+
+          district TEXT NOT NULL,
+
+          state TEXT NOT NULL,
+
+          pincode VARCHAR(10) NOT NULL,
+
+          quantity INTEGER NOT NULL,
+
+          product TEXT NOT NULL,
+
+          source TEXT,
+
+          campaign TEXT,
+
+          utm_source TEXT,
+
+          utm_medium TEXT,
+
+          created_at TIMESTAMPTZ NOT NULL,
+
+          status TEXT NOT NULL,
+
+          created_at_db TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+    })().catch((error) => {
+      tableReady = null;
+      throw error;
+    });
+  }
+
+  await tableReady;
 }
 
-function writeAll(leads: Lead[]) {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(DATA_FILE, JSON.stringify(leads, null, 2), "utf-8");
+/**
+ * Get the next lead number.
+ */
+export async function getNextLeadNumber(): Promise<number> {
+  await ensureDatabase();
+
+  if (!sql) {
+    throw new Error(
+      "DATABASE_URL is not configured."
+    );
+  }
+
+  const result = await sql`
+    SELECT nextval('lead_number_seq') AS number
+  `;
+
+  return Number(result[0].number);
 }
 
-export function getNextLeadNumber(): number {
-  const leads = readAll();
-  return leads.length + 1;
-}
+/**
+ * Save a lead permanently to PostgreSQL.
+ */
+export async function saveLead(
+  lead: Lead
+): Promise<Lead> {
+  await ensureDatabase();
 
-export function saveLead(lead: Lead): Lead {
-  const leads = readAll();
-  leads.push(lead);
-  writeAll(leads);
+  if (!sql) {
+    throw new Error(
+      "DATABASE_URL is not configured."
+    );
+  }
+
+  await sql`
+    INSERT INTO leads (
+      lead_id,
+      name,
+      mobile,
+      house_building,
+      street_area,
+      locality,
+      district,
+      state,
+      pincode,
+      quantity,
+      product,
+      source,
+      campaign,
+      utm_source,
+      utm_medium,
+      created_at,
+      status
+    )
+    VALUES (
+      ${lead.leadId},
+      ${lead.name},
+      ${lead.mobile},
+      ${lead.houseBuilding},
+      ${lead.streetArea},
+      ${lead.locality},
+      ${lead.district},
+      ${lead.state},
+      ${lead.pincode},
+      ${lead.quantity},
+      ${lead.product},
+      ${lead.source ?? null},
+      ${lead.campaign ?? null},
+      ${lead.utmSource ?? null},
+      ${lead.utmMedium ?? null},
+      ${lead.createdAt},
+      ${lead.status}
+    )
+  `;
+
+  console.log(
+    `[Lead Store] Lead ${lead.leadId} saved successfully.`
+  );
+
   return lead;
 }
 
-export function formatLeadId(n: number): string {
+/**
+ * Format lead ID.
+ *
+ * Example:
+ * DV000001
+ * DV000002
+ * DV000003
+ */
+export function formatLeadId(
+  n: number
+): string {
   return `DV${String(n).padStart(6, "0")}`;
 }

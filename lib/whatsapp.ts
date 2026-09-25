@@ -1,67 +1,33 @@
 import type { Lead } from "./types";
 
-/**
- * Sends a new Divyamrut lead notification
- * to the business WhatsApp number using
- * Meta WhatsApp Cloud API.
- *
- * Required environment variables:
- *
- * WHATSAPP_ACCESS_TOKEN
- * WHATSAPP_PHONE_NUMBER_ID
- * WHATSAPP_NOTIFY_TO
- *
- * Example:
- *
- * WHATSAPP_NOTIFY_TO=918943200063
- *
- * IMPORTANT:
- * - Do not put these values in frontend code.
- * - Do not use +, spaces, or hyphens in WHATSAPP_NOTIFY_TO.
- * - Configure these variables in Vercel Environment Variables.
- */
-
 export async function notifyBusinessOfNewLead(
   lead: Lead
 ): Promise<boolean> {
   const token = process.env.WHATSAPP_ACCESS_TOKEN;
-
-  const phoneNumberId =
-    process.env.WHATSAPP_PHONE_NUMBER_ID;
-
-  const notifyTo =
-    process.env.WHATSAPP_NOTIFY_TO;
+  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+  const notifyTo = process.env.WHATSAPP_NOTIFY_TO;
 
   // --------------------------------------------------
   // 1. CHECK ENVIRONMENT VARIABLES
   // --------------------------------------------------
 
   if (!token) {
-    console.error(
-      "[WhatsApp] Missing WHATSAPP_ACCESS_TOKEN"
-    );
-
+    console.error("[WhatsApp] Missing WHATSAPP_ACCESS_TOKEN");
     return false;
   }
 
   if (!phoneNumberId) {
-    console.error(
-      "[WhatsApp] Missing WHATSAPP_PHONE_NUMBER_ID"
-    );
-
+    console.error("[WhatsApp] Missing WHATSAPP_PHONE_NUMBER_ID");
     return false;
   }
 
   if (!notifyTo) {
-    console.error(
-      "[WhatsApp] Missing WHATSAPP_NOTIFY_TO"
-    );
-
+    console.error("[WhatsApp] Missing WHATSAPP_NOTIFY_TO");
     return false;
   }
 
   // --------------------------------------------------
-  // 2. CLEAN BUSINESS WHATSAPP NUMBER
+  // 2. CLEAN RECIPIENT NUMBER
   // --------------------------------------------------
 
   const recipient = notifyTo
@@ -70,16 +36,12 @@ export async function notifyBusinessOfNewLead(
     .replace(/-/g, "");
 
   if (!/^\d{10,15}$/.test(recipient)) {
-    console.error(
-      "[WhatsApp] Invalid WHATSAPP_NOTIFY_TO:",
-      recipient
-    );
-
+    console.error("[WhatsApp] Invalid recipient number");
     return false;
   }
 
   // --------------------------------------------------
-  // 3. CREATE MESSAGE
+  // 3. CREATE LEAD MESSAGE
   // --------------------------------------------------
 
   const message = [
@@ -105,12 +67,11 @@ export async function notifyBusinessOfNewLead(
   ].join("\n");
 
   // --------------------------------------------------
-  // 4. META WHATSAPP CLOUD API URL
+  // 4. META WHATSAPP CLOUD API
   // --------------------------------------------------
 
   const url =
-    `https://graph.facebook.com/v20.0/` +
-    `${phoneNumberId}/messages`;
+    `https://graph.facebook.com/v20.0/${phoneNumberId}/messages`;
 
   // --------------------------------------------------
   // 5. SEND MESSAGE
@@ -119,10 +80,6 @@ export async function notifyBusinessOfNewLead(
   try {
     console.log(
       `[WhatsApp] Sending notification for ${lead.leadId}`
-    );
-
-    console.log(
-      `[WhatsApp] Recipient: ${recipient}`
     );
 
     const response = await fetch(url, {
@@ -135,13 +92,9 @@ export async function notifyBusinessOfNewLead(
 
       body: JSON.stringify({
         messaging_product: "whatsapp",
-
         recipient_type: "individual",
-
         to: recipient,
-
         type: "text",
-
         text: {
           preview_url: false,
           body: message,
@@ -149,14 +102,9 @@ export async function notifyBusinessOfNewLead(
       }),
     });
 
-    // --------------------------------------------------
-    // 6. READ META RESPONSE
-    // --------------------------------------------------
+    const responseText = await response.text();
 
-    const responseText =
-      await response.text();
-
-    let responseData: unknown;
+    let responseData: unknown = null;
 
     try {
       responseData = responseText
@@ -167,7 +115,7 @@ export async function notifyBusinessOfNewLead(
     }
 
     // --------------------------------------------------
-    // 7. HANDLE META ERROR
+    // 6. HANDLE META ERROR
     // --------------------------------------------------
 
     if (!response.ok) {
@@ -189,16 +137,11 @@ export async function notifyBusinessOfNewLead(
     }
 
     // --------------------------------------------------
-    // 8. SUCCESS
+    // 7. SUCCESS
     // --------------------------------------------------
 
     console.log(
       `[WhatsApp] Message sent successfully for ${lead.leadId}`
-    );
-
-    console.log(
-      "[WhatsApp] Meta response:",
-      responseData
     );
 
     return true;

@@ -7,51 +7,39 @@ import {
   normalizeMobile,
 } from "@/lib/validation";
 
-import {
-  getNextLeadNumber,
-  saveLead,
-  formatLeadId,
-} from "@/lib/leadStore";
+import { formatLeadId } from "@/lib/leadStore";
 
 import { notifyBusinessOfNewLead } from "@/lib/whatsapp";
 
 import type { Lead } from "@/lib/types";
 
-export async function POST(req: NextRequest) {
-  let body: Record<string, unknown>;
+let leadCounter = 0;
 
+export async function POST(req: NextRequest) {
   // --------------------------------------------------
-  // 1. READ REQUEST BODY
+  // 1. READ REQUEST
   // --------------------------------------------------
+
+  let body: Record<string, unknown>;
 
   try {
     body = await req.json();
-  } catch (error) {
-    console.error(
-      "[Lead API] Invalid request body:",
-      error
-    );
-
+  } catch {
     return NextResponse.json(
       {
         success: false,
         error: "Invalid request body.",
       },
-      {
-        status: 400,
-      }
+      { status: 400 }
     );
   }
 
   // --------------------------------------------------
-  // 2. EXTRACT FORM DATA
+  // 2. EXTRACT DATA
   // --------------------------------------------------
 
-  const fullName =
-    String(body.fullName || "").trim();
-
-  const mobile =
-    String(body.mobile || "").trim();
+  const fullName = String(body.fullName || "").trim();
+  const mobile = String(body.mobile || "").trim();
 
   const houseBuilding =
     String(body.houseBuilding || "").trim();
@@ -71,8 +59,7 @@ export async function POST(req: NextRequest) {
   const pincode =
     String(body.pincode || "").trim();
 
-  const quantity =
-    Number(body.quantity || 1);
+  const quantity = Number(body.quantity || 1);
 
   const source =
     String(body.source || "Website").trim();
@@ -96,8 +83,7 @@ export async function POST(req: NextRequest) {
   const errors: Record<string, string> = {};
 
   if (!isNonEmpty(fullName)) {
-    errors.fullName =
-      "Full name is required.";
+    errors.fullName = "Full name is required.";
   }
 
   if (!isValidIndianMobile(mobile)) {
@@ -135,29 +121,19 @@ export async function POST(req: NextRequest) {
       "Enter a valid 6-digit PIN code.";
   }
 
-  if (
-    !Number.isFinite(quantity) ||
-    quantity < 1
-  ) {
+  if (!Number.isFinite(quantity) || quantity < 1) {
     errors.quantity =
       "Quantity must be at least 1.";
   }
 
   if (Object.keys(errors).length > 0) {
-    console.warn(
-      "[Lead API] Validation failed:",
-      errors
-    );
-
     return NextResponse.json(
       {
         success: false,
         error: "Validation failed.",
         fields: errors,
       },
-      {
-        status: 422,
-      }
+      { status: 422 }
     );
   }
 
@@ -165,31 +141,9 @@ export async function POST(req: NextRequest) {
   // 4. CREATE LEAD ID
   // --------------------------------------------------
 
-  let leadNumber: number;
+  leadCounter += 1;
 
-  try {
-    leadNumber =
-      getNextLeadNumber() + 1;
-  } catch (error) {
-    console.error(
-      "[Lead API] Failed to generate lead number:",
-      error
-    );
-
-    return NextResponse.json(
-      {
-        success: false,
-        error:
-          "Unable to generate order reference. Please try again.",
-      },
-      {
-        status: 500,
-      }
-    );
-  }
-
-  const leadId =
-    formatLeadId(leadNumber);
+  const leadId = formatLeadId(leadCounter);
 
   // --------------------------------------------------
   // 5. CREATE LEAD
@@ -226,81 +180,50 @@ export async function POST(req: NextRequest) {
 
     utmMedium,
 
-    createdAt:
-      new Date().toISOString(),
+    createdAt: new Date().toISOString(),
 
     status: "New Lead",
   };
 
   // --------------------------------------------------
-  // 6. SAVE LEAD
+  // 6. SEND WHATSAPP
   // --------------------------------------------------
 
-  try {
-    saveLead(lead);
+  const whatsappSent =
+    await notifyBusinessOfNewLead(lead);
 
-    console.log(
-      `[Lead API] Lead ${leadId} saved successfully.`
-    );
-  } catch (error) {
+  // --------------------------------------------------
+  // 7. IF WHATSAPP FAILED
+  // --------------------------------------------------
+
+  if (!whatsappSent) {
     console.error(
-      `[Lead API] Failed to save ${leadId}:`,
-      error
+      `[Lead API] WhatsApp notification failed for ${leadId}`
     );
 
     return NextResponse.json(
       {
         success: false,
         error:
-          "Unable to save your order. Please try again.",
+          "We could not send your order. Please try again.",
       },
-      {
-        status: 500,
-      }
+      { status: 500 }
     );
   }
 
   // --------------------------------------------------
-  // 7. SEND WHATSAPP NOTIFICATION
+  // 8. SUCCESS
   // --------------------------------------------------
 
-  /*
-   * WhatsApp failure will NOT make the customer's
-   * order fail.
-   *
-   * The lead has already been saved successfully.
-   */
-
-  notifyBusinessOfNewLead(lead)
-    .then((success) => {
-      if (success) {
-        console.log(
-          `[Lead API] WhatsApp notification sent for ${leadId}.`
-        );
-      } else {
-        console.error(
-          `[Lead API] WhatsApp notification failed for ${leadId}.`
-        );
-      }
-    })
-    .catch((error) => {
-      console.error(
-        `[Lead API] WhatsApp notification error for ${leadId}:`,
-        error
-      );
-    });
-
-  // --------------------------------------------------
-  // 8. RETURN SUCCESS TO CUSTOMER
-  // --------------------------------------------------
+  console.log(
+    `[Lead API] Lead ${leadId} sent successfully to WhatsApp.`
+  );
 
   return NextResponse.json(
     {
       success: true,
       leadId,
     },
-    {
-      status: 201,
-    }
+    { status: 201 }
   );
 }
